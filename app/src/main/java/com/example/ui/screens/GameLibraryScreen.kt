@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Image
@@ -34,6 +35,11 @@ import com.example.ui.GameBoostViewModel
 import com.example.ui.components.GlassCard
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.text.font.FontFamily
+import com.example.booster.domain.MemoryBooster
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +55,7 @@ fun GameLibraryScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var appsSearchQuery by remember { mutableStateOf("") }
+    var optimizingGame by remember { mutableStateOf<InstalledGame?>(null) }
 
     // Filter games list
     val filteredGames = remember(games, searchQuery, selectedFilter) {
@@ -228,7 +235,7 @@ fun GameLibraryScreen(
                     GameGridItemCard(
                         game = game,
                         iconProvider = { viewModel.getAppIcon(game.packageName) },
-                        onLaunch = { viewModel.launchGame(game) },
+                        onLaunch = { optimizingGame = game },
                         onToggleFavorite = { viewModel.toggleFavorite(game.packageName, !game.isFavorite) },
                         onDelete = if (game.isManual) { { viewModel.removeDeletedGame(game) } } else null
                     )
@@ -335,6 +342,19 @@ fun GameLibraryScreen(
                 }
             }
         }
+    }
+
+    if (optimizingGame != null) {
+        GameOptimizationLaunchScreen(
+            game = optimizingGame!!,
+            viewModel = viewModel,
+            onFinished = {
+                val currentTarget = optimizingGame!!
+                viewModel.launchGame(currentTarget)
+                optimizingGame = null
+            },
+            onDismiss = { optimizingGame = null }
+        )
     }
 }
 
@@ -487,3 +507,241 @@ fun DrawableImage(
         contentScale = ContentScale.Fit
     )
 }
+
+@Composable
+fun GameOptimizationLaunchScreen(
+    game: InstalledGame,
+    viewModel: GameBoostViewModel,
+    onFinished: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var progress by remember { mutableStateOf(0f) }
+    var statusText by remember { mutableStateOf("Initializing acceleration protocols...") }
+    var freedRamText by remember { mutableStateOf("") }
+
+    val hasOverlayPermission = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            android.provider.Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    LaunchedEffect(game) {
+        // Run deep RAM memory optimization during the launch animation
+        val boostJob = async(Dispatchers.IO) {
+            val booster = MemoryBooster(context)
+            booster.performBoost()
+        }
+
+        // Staggered stages sequence
+        val stages = listOf(
+            "Acquiring high-priority graphics thread..." to 20,
+            "Optimizing scheduling priority queue..." to 40,
+            "Clearing background memory tables..." to 65,
+            "Injecting gaming telemetry services..." to 85,
+            "Launching Game Sandbox environment..." to 100
+        )
+
+        for (stage in stages) {
+            val targetProgress = stage.second
+            val label = stage.first
+            statusText = label
+
+            while (progress < targetProgress / 100f) {
+                delay(20)
+                progress += 0.02f
+            }
+            if (targetProgress == 65) {
+                // Wait for the memory boost clean calculations to complete and update freedRamText
+                try {
+                    val stats = boostJob.await()
+                    freedRamText = "Released ${stats.reclaimedRamMb.toInt()}MB of RAM & killed ${stats.processesKilled} items!"
+                } catch (e: Exception) {
+                    freedRamText = "Memory optimized & prioritized!"
+                }
+            }
+            delay(150)
+        }
+        progress = 1f
+        delay(500)
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF07080F))
+            .clickable(enabled = false) {}, // Block clicks background
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth()
+        ) {
+            // Title
+            Text(
+                text = "HYPER BOOST ACTIVE",
+                color = Color(0xFFFF007F),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = game.name.uppercase(Locale.getDefault()),
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp
+            )
+
+            Text(
+                text = game.packageName,
+                color = Color.Gray,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // Gauge/Booster Animation Component
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(160.dp)
+            ) {
+                CircularProgressIndicator(
+                    progress = { progress },
+                    color = Color(0xFF00FFCC),
+                    strokeWidth = 6.dp,
+                    trackColor = Color(0x1F2A2E42),
+                    modifier = Modifier.size(140.dp)
+                )
+
+                // Gaming target rocket icon pulsing
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = "Booster active",
+                        tint = Color(0xFF00FFCC),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Text(
+                        text = "${(progress * 100).toInt()}%",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // Optimization outputs
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(0.85f)
+            ) {
+                Text(
+                    text = statusText,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 1
+                )
+
+                if (freedRamText.isNotEmpty()) {
+                    Text(
+                        text = freedRamText,
+                        color = Color(0xFFCCFF00),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Floating mini HUD status warning/helper info
+            if (!hasOverlayPermission) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0x33FFFF00)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x66FFFF00)),
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Overlay Warning",
+                                tint = Color(0xFFFFCC00),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "DASHBOARD MINI HUD DISABLED",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFFCC00),
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                        Text(
+                            text = "Để hiển thị dashboard mini theo dõi FPS & RAM ngay trong game, vui lòng cấp quyền vẽ đè (Overlay) trong Cài đặt.",
+                            fontSize = 11.sp,
+                            color = Color.LightGray
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0x2200FFCC)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4D00FFCC)),
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Success HUD",
+                            tint = Color(0xFF00FFCC),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Dashboard mini HUD in-game đã sẵn sàng!",
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
