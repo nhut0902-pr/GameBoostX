@@ -1,0 +1,6 @@
+{
+  "name": "GameBoostX",
+  "description": "Advanced gaming utility featuring custom game launcher, one-tap booster, floating in-game performance overlay, detailed hardware telemetry dashboard, gaming mode, and session analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
