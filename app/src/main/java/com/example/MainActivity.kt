@@ -19,6 +19,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
@@ -37,18 +41,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            // Re-apply local window optimizations (Keep screen awake & Lock brightness) reactively
-            val isScreenAwake by viewModel.isScreenAwakeEnabled.collectAsState()
-            val isBrightnessLocked by viewModel.isBrightnessLocked.collectAsState()
-            val brightnessVal by viewModel.lockedBrightnessValue.collectAsState()
-
-            LaunchedEffect(isScreenAwake, isBrightnessLocked, brightnessVal) {
-                viewModel.applyLocalWindowOptimizations(window)
-            }
-
-            val navController = rememberNavController()
-            val navBackStackEntry by navController.currentBackStackEntryAsState()
-            val currentRoute = navBackStackEntry?.destination?.route ?: "home"
+            var showSplash by remember { mutableStateOf(true) }
 
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -61,18 +54,34 @@ class MainActivity : ComponentActivity() {
                     onSurface = Color.White
                 )
             ) {
-                // Global update alert check on startup
-                val updateState by viewModel.updateState.collectAsState()
-                var showUpdateDialog by remember { mutableStateOf(false) }
+                if (showSplash) {
+                    SplashScreen(onFinished = { showSplash = false })
+                } else {
+                    // Re-apply local window optimizations (Keep screen awake & Lock brightness) reactively
+                    val isScreenAwake by viewModel.isScreenAwakeEnabled.collectAsState()
+                    val isBrightnessLocked by viewModel.isBrightnessLocked.collectAsState()
+                    val brightnessVal by viewModel.lockedBrightnessValue.collectAsState()
 
-                LaunchedEffect(updateState) {
-                    showUpdateDialog = when (updateState) {
-                        is com.example.update.UpdateState.UpdateAvailable -> true
-                        is com.example.update.UpdateState.Downloading -> true
-                        is com.example.update.UpdateState.ReadyToInstall -> true
-                        else -> false
+                    LaunchedEffect(isScreenAwake, isBrightnessLocked, brightnessVal) {
+                        viewModel.applyLocalWindowOptimizations(window)
                     }
-                }
+
+                    val navController = rememberNavController()
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentRoute = navBackStackEntry?.destination?.route ?: "home"
+
+                    // Global update alert check on startup
+                    val updateState by viewModel.updateState.collectAsState()
+                    var showUpdateDialog by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(updateState) {
+                        showUpdateDialog = when (updateState) {
+                            is com.example.update.UpdateState.UpdateAvailable -> true
+                            is com.example.update.UpdateState.Downloading -> true
+                            is com.example.update.UpdateState.ReadyToInstall -> true
+                            else -> false
+                        }
+                    }
 
                 if (showUpdateDialog) {
                     androidx.compose.ui.window.Dialog(onDismissRequest = { 
@@ -312,6 +321,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
         }
     }
 }
@@ -321,3 +331,120 @@ data class NavigationTabItem(
     val label: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector
 )
+
+@Composable
+fun SplashScreen(onFinished: () -> Unit) {
+    var progress by remember { mutableStateOf(0f) }
+    var currentTask by remember { mutableStateOf("Initializing Core Engine...") }
+
+    LaunchedEffect(Unit) {
+        val tasks = listOf(
+            "Initializing Core Engine...",
+            "Loading Gaming Profiles...",
+            "Establishing Telemetry Service...",
+            "Preparing Sandbox..."
+        )
+        for (i in 1..100) {
+            delay(20)
+            progress = i / 100f
+            if (i == 25) currentTask = tasks[1]
+            if (i == 55) currentTask = tasks[2]
+            if (i == 80) currentTask = tasks[3]
+        }
+        delay(300)
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF07080F)),
+        contentAlignment = androidx.compose.ui.Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(24.dp)
+        ) {
+            // Visual Logo Loaded from user asset
+            Image(
+                painter = painterResource(id = R.drawable.game_boost_logo_1780102311126),
+                contentDescription = "GameBoostX Logo",
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0x1F00FFCC))
+                    .padding(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "GAMEBOOSTX",
+                color = Color.White,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 3.sp
+            )
+
+            Text(
+                text = "BOOST • MONITOR • RECLAIM",
+                color = Color(0xFF00FFCC),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // Loading system tasks progress
+            Column(
+                modifier = Modifier.width(200.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+            ) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    color = Color(0xFFFF007F),
+                    trackColor = Color(0x33FFFFFF),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = currentTask,
+                    color = Color.Gray,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        // Dedicated Nhutcoder branding display at bottom
+        Column(
+            modifier = Modifier
+                .align(androidx.compose.ui.Alignment.BottomCenter)
+                .padding(bottom = 36.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "POWERED BY",
+                color = Color.Gray,
+                fontSize = 9.sp,
+                letterSpacing = 1.2.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Nhutcoder Team",
+                color = Color(0xFF00FFCC),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp
+            )
+        }
+    }
+}

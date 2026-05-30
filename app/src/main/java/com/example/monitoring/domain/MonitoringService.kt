@@ -38,8 +38,15 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.MainActivity
+import com.example.R
+import com.example.booster.domain.GamingModeManager
+import com.example.booster.domain.GamingProfile
+import com.example.booster.domain.MemoryBooster
 import com.example.monitoring.domain.HardwareMetrics
 import com.example.overlay.ui.FloatingLifecycleOwner
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -144,6 +151,9 @@ class MonitoringService : Service() {
                     sessionStartTime = System.currentTimeMillis()
                     clearSessionHistory()
                     startMonitoringLoop()
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+                    showOverlay()
                 }
             }
             ACTION_STOP -> {
@@ -447,7 +457,6 @@ class MonitoringService : Service() {
         val container = FrameLayout(this)
         
         composeView = ComposeView(this).apply {
-            // Bind Lifecycle tree holders
             val lifecycleOwner = FloatingLifecycleOwner()
             floatingLifecycleOwner = lifecycleOwner
 
@@ -456,13 +465,14 @@ class MonitoringService : Service() {
             setViewTreeSavedStateRegistryOwner(lifecycleOwner)
 
             setContent {
-                var overlayMode by remember { mutableStateOf("expanded") } // compact, expanded, transparent
+                var overlayMode by remember { mutableStateOf("bubble") } // bubble, panel, transparent
 
                 ThemeWrapper {
                     FloatingOverlayWidget(
                         metrics = _metricsState.collectAsState().value,
                         mode = overlayMode,
                         onModeChange = { overlayMode = it },
+                        onCloseOverlay = { removeOverlay() },
                         modifier = Modifier.pointerInput(Unit) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
@@ -503,7 +513,6 @@ class MonitoringService : Service() {
     }
 }
 
-// Transparent local custom minimal Material Theme container for system context drawing
 @Composable
 fun ThemeWrapper(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -524,207 +533,325 @@ fun FloatingOverlayWidget(
     metrics: HardwareMetrics,
     mode: String,
     onModeChange: (String) -> Unit,
+    onCloseOverlay: () -> Unit,
     modifier: Modifier,
     onOpenDashboard: () -> Unit
 ) {
-    val gradientBrush = Brush.linearGradient(
-        colors = when (mode) {
-            "transparent" -> listOf(Color(0x2212131A), Color(0x22090F14))
-            else -> listOf(Color(0xE61A1C29), Color(0xF20F121C))
-        }
-    )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Active Profile references & Booster objects
+    val gamingModeManager = remember { GamingModeManager(context) }
+    val activeProfile by GamingModeManager.activeProfile.collectAsState()
+    val memoryBooster = remember { MemoryBooster(context) }
+    
+    // Booster active text feedback states
+    var boostMessage by remember { mutableStateOf<String?>(null) }
+    var isBoosting by remember { mutableStateOf(false) }
 
-    Card(
-        modifier = modifier
-            .widthIn(max = 280.dp)
-            .padding(4.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-    ) {
-        Box(
-            modifier = Modifier
-                .background(gradientBrush)
-                .clip(RoundedCornerShape(12.dp))
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        colors = if (mode == "transparent") {
-                            listOf(Color(0x3300FFCC), Color(0x33FF007F))
-                        } else {
-                            listOf(Color(0xFF00FFCC), Color(0xFFFF007F))
-                        }
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+    when (mode) {
+        "bubble" -> {
+            // Floating bubble launcher
+            Box(
+                modifier = modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xE60A0C16))
+                    .border(1.5.dp, Color(0xFF00FFCC), RoundedCornerShape(28.dp))
+                    .clickable { onModeChange("panel") }
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Logo Image from the User uploaded asset
+                Image(
+                    painter = painterResource(id = R.drawable.game_boost_logo_1780102311126),
+                    contentDescription = "Logo",
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp))
                 )
-                .padding(8.dp)
-        ) {
-            if (mode == "compact") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(2.dp)
+                
+                // Overlay text badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .background(Color(0xE6000000), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Circle,
-                        contentDescription = "Active Indicator",
-                        tint = Color(0xFF00FFCC),
-                        modifier = Modifier.size(10.dp)
-                    )
                     Text(
-                        text = "FPS: ${metrics.fps}",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
+                        text = "${metrics.fps}",
                         color = Color(0xFF00FFCC),
-                        fontSize = 13.sp
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
+                }
+            }
+        }
+        "transparent" -> {
+            // Minimalist real-time tracker overlay
+            Card(
+                modifier = modifier
+                    .widthIn(max = 240.dp)
+                    .padding(4.dp)
+                    .clickable { onModeChange("panel") },
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x6607080F))
+            ) {
+                Row(
+                    modifier = Modifier.padding(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
-                        text = "${metrics.cpuUsage.toInt()}% CPU",
+                        text = "${metrics.fps} FPS",
                         fontFamily = FontFamily.Monospace,
-                        color = Color.White,
+                        color = Color(0xFF00FFCC),
+                        fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
-                    IconButton(
-                        onClick = { onModeChange("expanded") },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Launch,
-                            contentDescription = "Expand Overlay",
-                            tint = Color.LightGray,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
+                    Text(
+                        text = "${metrics.netPingMs}ms",
+                        fontFamily = FontFamily.Monospace,
+                        color = if (metrics.netPingMs > 80) Color(0xFFFF007F) else Color(0xFFCCFF00),
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = String.format("%.1f°C", metrics.batteryTemp),
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White,
+                        fontSize = 10.sp
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Icon(
+                        imageVector = Icons.Default.Launch,
+                        contentDescription = "Expand",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(12.dp)
+                    )
                 }
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+            }
+        }
+        else -> {
+            // "panel" expanded gaming controller mode
+            val gradientBrush = Brush.linearGradient(
+                colors = listOf(Color(0xF20F121C), Color(0xF21A1C29))
+            )
+
+            Card(
+                modifier = modifier
+                    .width(250.dp)
+                    .padding(4.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(gradientBrush)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(Color(0xFF00FFCC), Color(0xFFFF007F))
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .padding(10.dp)
                 ) {
-                    // Header control bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
+                        // Header bar
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = "Active Speed",
-                                tint = Color(0xFF00FFCC),
-                                modifier = Modifier.size(16.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.game_boost_logo_1780102311126),
+                                    contentDescription = "Logo",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "GAMEBOOSTX",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF00FFCC),
+                                    letterSpacing = 1.sp
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(onClick = { onModeChange("transparent") }, modifier = Modifier.size(20.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Visibility,
+                                        contentDescription = "Transparent Mode",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                IconButton(onClick = onOpenDashboard, modifier = Modifier.size(20.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fullscreen,
+                                        contentDescription = "Dashboard",
+                                        tint = Color(0xFFFFFF00),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                IconButton(onClick = { onModeChange("bubble") }, modifier = Modifier.size(20.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Minimize,
+                                        contentDescription = "Minimize to Bubble",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                IconButton(onClick = onCloseOverlay, modifier = Modifier.size(20.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close overlay",
+                                        tint = Color(0xFFFF007F),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Divider(color = Color(0x2BFFFFFF), thickness = 0.5.dp)
+
+                        // Mode info banner
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x1F00FFCC), RoundedCornerShape(4.dp))
+                                .padding(vertical = 4.dp, horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "ACTIVE PROFILE:",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray
                             )
                             Text(
-                                text = "GBX OVERLAY",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 11.sp
+                                text = activeProfile.name,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                color = when (activeProfile) {
+                                    GamingProfile.PERFORMANCE -> Color(0xFFFF007F)
+                                    GamingProfile.BALANCED -> Color(0xFF00FFCC)
+                                    GamingProfile.BATTERY_SAVER -> Color(0xFFCCFF00)
+                                }
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            IconButton(
-                                onClick = {
-                                    val nextMode = if (mode == "expanded") "transparent" else "compact"
-                                    onModeChange(nextMode)
-                                },
-                                modifier = Modifier.size(20.dp)
+                        // Core Real-Time Telemetry Stats Rows
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            TelemetryItem(label = "FPS", value = "${metrics.fps}", tint = Color(0xFF00FFCC), modifier = Modifier.weight(1f))
+                            TelemetryItem(label = "PING", value = "${metrics.netPingMs}ms", tint = if (metrics.netPingMs > 80) Color.Red else Color(0xFFCCFF00), modifier = Modifier.weight(1f))
+                            TelemetryItem(label = "TEMP", value = String.format("%.1f°C", metrics.batteryTemp), tint = if (metrics.isThermalWarning) Color.Red else Color.Green, modifier = Modifier.weight(1f))
+                        }
+                        
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            TelemetryItem(label = "CPU %", value = "${metrics.cpuUsage.toInt()}%", tint = Color.White, modifier = Modifier.weight(1f))
+                            TelemetryItem(label = "RAM (USED)", value = "${metrics.ramUsedMb.toInt()}M", tint = Color.White, modifier = Modifier.weight(1f))
+                            TelemetryItem(label = "DOWN SPEED", value = if (metrics.downloadSpeedKbps > 1024f) String.format("%.1f MB/s", metrics.downloadSpeedKbps / 1024f) else String.format("%.0f KB/s", metrics.downloadSpeedKbps), tint = Color(0xFFFF007F), modifier = Modifier.weight(1f))
+                        }
+
+                        Divider(color = Color(0x1AFFFFFF), thickness = 0.5.dp)
+
+                        // Mode Selector Chips
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("PROFILE SWITCHER", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    imageVector = if (mode == "transparent") Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = "Toggle Transparency",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                            IconButton(onClick = onOpenDashboard, modifier = Modifier.size(20.dp)) {
-                                Icon(
-                                    imageVector = Icons.Default.Fullscreen,
-                                    contentDescription = "Show Dashboard",
-                                    tint = Color(0xFFFF007F),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = { onModeChange("compact") },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Switch to Compact",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier.size(12.dp)
-                                )
+                                GamingProfile.values().forEach { profile ->
+                                    val isCurrent = activeProfile == profile
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (isCurrent) Color(0x3300FFCC) else Color(0x1F11121A))
+                                            .border(
+                                                1.dp,
+                                                if (isCurrent) Color(0xFF00FFCC) else Color(0x1AFFFFFF),
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .clickable { gamingModeManager.setProfile(profile) }
+                                            .padding(vertical = 4.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = when (profile) {
+                                                GamingProfile.PERFORMANCE -> "PERF"
+                                                GamingProfile.BALANCED -> "BAL"
+                                                GamingProfile.BATTERY_SAVER -> "SAVE"
+                                            },
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isCurrent) Color(0xFF00FFCC) else Color.Gray
+                                        )
+                                    }
+                                }
                             }
                         }
-                    }
 
-                    Divider(
-                        color = Color(0x33FFFFFF),
-                        thickness = 0.5.dp,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-
-                    // Core stats
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TelemetryItem(
-                            label = "FPS",
-                            value = "${metrics.fps}",
-                            tint = Color(0xFF00FFCC),
-                            modifier = Modifier.weight(1f)
-                        )
-                        TelemetryItem(
-                            label = "PING",
-                            value = "${metrics.netPingMs}ms",
-                            tint = if (metrics.netPingMs > 100) Color.Red else Color(0xFFCCFF00),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TelemetryItem(
-                            label = "CPU",
-                            value = "${metrics.cpuUsage.toInt()}%",
-                            tint = Color.White,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TelemetryItem(
-                            label = "RAM",
-                            value = "${metrics.ramUsedMb.toInt()}M",
-                            tint = Color.White,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TelemetryItem(
-                            label = "TEMP",
-                            value = String.format("%.1f°C", metrics.batteryTemp),
-                            tint = if (metrics.isThermalWarning) Color.Red else Color.Green,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TelemetryItem(
-                            label = "NETWORK",
-                            value = if (metrics.downloadSpeedKbps > 1024f) {
-                                String.format("%.1f MBs", metrics.downloadSpeedKbps / 1024f)
-                            } else {
-                                String.format("%.0f KBs", metrics.downloadSpeedKbps)
+                        // RAM Boost Trigger
+                        Button(
+                            onClick = {
+                                if (!isBoosting) {
+                                    isBoosting = true
+                                    coroutineScope.launch {
+                                        val result = memoryBooster.performBoost()
+                                        boostMessage = "Boosted! Freed ${result.reclaimedRamMb.toInt()} MB"
+                                        isBoosting = false
+                                        delay(3000)
+                                        boostMessage = null
+                                    }
+                                }
                             },
-                            tint = Color(0xFFFF007F),
-                            modifier = Modifier.weight(1f)
-                        )
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().height(32.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = if (isBoosting) "BOOSTING..." else "ENGAGE RAM BOOST",
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        boostMessage?.let { msg ->
+                            Text(
+                                text = msg,
+                                color = Color(0xFFCCFF00),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+
+                        // Powered By Nhutcoder Team
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Powered By Nhutcoder Team",
+                                color = Color(0x8800FFCC),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

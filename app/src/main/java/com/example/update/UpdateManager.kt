@@ -36,14 +36,12 @@ class UpdateManager(private val context: Context) {
     val updateState: StateFlow<UpdateState> = _updateState
 
     // Persistence settings
-    fun getGitHubOwner(): String = prefs.getString("github_owner", "lamminhnhut09022011") ?: "lamminhnhut09022011"
-    fun getGitHubRepo(): String = prefs.getString("github_repo", "GameBoostX") ?: "GameBoostX"
+    fun getGitHubOwner(): String = "nhut0902-pr"
+    fun getGitHubRepo(): String = "GameBoostX"
     fun isAutoCheckEnabled(): Boolean = prefs.getBoolean("github_auto_check", true)
 
     fun saveGitHubSettings(owner: String, repo: String, autoCheck: Boolean) {
         prefs.edit()
-            .putString("github_owner", owner.trim())
-            .putString("github_repo", repo.trim())
             .putBoolean("github_auto_check", autoCheck)
             .apply()
     }

@@ -282,8 +282,6 @@ fun SettingsScreen(
         }
 
         // Section: GitHub Auto-Update Configuration
-        var gitHubOwner by remember { mutableStateOf(viewModel.updateManager.getGitHubOwner()) }
-        var gitHubRepo by remember { mutableStateOf(viewModel.updateManager.getGitHubRepo()) }
         var isAutoCheckEnabled by remember { mutableStateOf(viewModel.updateManager.isAutoCheckEnabled()) }
         val updateState by viewModel.updateState.collectAsState()
 
@@ -300,38 +298,6 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
-                    value = gitHubOwner,
-                    onValueChange = {
-                        gitHubOwner = it
-                        viewModel.saveGitHubSettings(it, gitHubRepo, isAutoCheckEnabled)
-                    },
-                    label = { Text("GitHub Owner", color = Color.Gray) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF00FFCC),
-                        unfocusedBorderColor = Color.DarkGray
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("update_owner_input")
-                )
-
-                OutlinedTextField(
-                    value = gitHubRepo,
-                    onValueChange = {
-                        gitHubRepo = it
-                        viewModel.saveGitHubSettings(gitHubOwner, it, isAutoCheckEnabled)
-                    },
-                    label = { Text("GitHub Repository Name", color = Color.Gray) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF00FFCC),
-                        unfocusedBorderColor = Color.DarkGray
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("update_repo_input")
-                )
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -346,7 +312,7 @@ fun SettingsScreen(
                         checked = isAutoCheckEnabled,
                         onCheckedChange = {
                             isAutoCheckEnabled = it
-                            viewModel.saveGitHubSettings(gitHubOwner, gitHubRepo, it)
+                            viewModel.saveGitHubSettings("", "", it)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color(0xFF00FFCC),
