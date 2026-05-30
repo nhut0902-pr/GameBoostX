@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.example.ui.GameBoostViewModel
 import com.example.ui.components.GlassCard
 
@@ -32,6 +35,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     
     // Config state binders
     val isOverlayShowing by viewModel.isOverlayShowing.collectAsState()
@@ -53,12 +57,20 @@ fun SettingsScreen(
         mutableStateOf(viewModel.hasDndPermission())
     }
 
-    // Refresh permissions on screen resume / interactive actions
-    LaunchedEffect(Unit) {
-        hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else true
-        hasDndPermission = viewModel.hasDndPermission()
+    // Refresh permissions automatically when returning to the app from background/settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Settings.canDrawOverlays(context)
+                } else true
+                hasDndPermission = viewModel.hasDndPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Column(

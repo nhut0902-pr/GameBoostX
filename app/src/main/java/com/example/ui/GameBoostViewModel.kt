@@ -135,6 +135,13 @@ class GameBoostViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun scanGames() {
+        viewModelScope.launch {
+            gameRepository.scanGames()
+            loadInstallableApps()
+        }
+    }
+
     fun toggleFavorite(packageName: String, isFavorite: Boolean) {
         viewModelScope.launch {
             gameRepository.updateFavorite(packageName, isFavorite)
@@ -187,7 +194,11 @@ class GameBoostViewModel(application: Application) : AndroidViewModel(applicatio
         val intent = Intent(context, MonitoringService::class.java).apply {
             action = MonitoringService.ACTION_TOGGLE_OVERLAY
         }
-        context.startService(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     fun performOneTapBoost() {

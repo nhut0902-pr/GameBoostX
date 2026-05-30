@@ -136,6 +136,35 @@ class GameRepository(
             }
         }
 
+        // DEEPER FALLBACK: If we still have an empty list or very few apps,
+        // let's fill the list with actually launchable apps on the device using intent queries
+        if (parsedGames.size < 3) {
+            try {
+                val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                }
+                val launchableApps = pm.queryIntentActivities(launcherIntent, 0)
+                for (info in launchableApps) {
+                    val pkg = info.activityInfo.packageName
+                    if (pkg == context.packageName) continue // Skip ourselves
+                    if (parsedGames.any { it.packageName == pkg }) continue // Skip if already added
+                    
+                    val label = info.loadLabel(pm).toString()
+                    parsedGames.add(
+                        InstalledGame(
+                            packageName = pkg,
+                            name = label,
+                            isFavorite = parsedGames.size < 2,
+                            isManual = false
+                        )
+                    )
+                    if (parsedGames.size >= 8) break // Let's limit list to a nice size
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         if (parsedGames.isNotEmpty()) {
             gameDao.insertGames(parsedGames)
         }

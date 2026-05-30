@@ -57,6 +57,10 @@ fun GameLibraryScreen(
     var appsSearchQuery by remember { mutableStateOf("") }
     var optimizingGame by remember { mutableStateOf<InstalledGame?>(null) }
 
+    LaunchedEffect(Unit) {
+        viewModel.scanGames()
+    }
+
     // Filter games list
     val filteredGames = remember(games, searchQuery, selectedFilter) {
         games.filter { game ->
@@ -104,21 +108,42 @@ fun GameLibraryScreen(
                 )
             }
 
-            IconButton(
-                onClick = {
-                    viewModel.loadInstallableApps()
-                    showAddDialog = true
-                },
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Color(0x1F00FFCC), RoundedCornerShape(8.dp))
-                    .testTag("add_game_dialog_button")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Game Manually",
-                    tint = Color(0xFF00FFCC)
-                )
+                IconButton(
+                    onClick = {
+                        viewModel.scanGames()
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Color(0x1F00FFCC), RoundedCornerShape(8.dp))
+                        .testTag("refresh_games_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Scan/Refresh Games",
+                        tint = Color(0xFF00FFCC)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        viewModel.loadInstallableApps()
+                        showAddDialog = true
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Color(0x1F00FFCC), RoundedCornerShape(8.dp))
+                        .testTag("add_game_dialog_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Game Manually",
+                        tint = Color(0xFF00FFCC)
+                    )
+                }
             }
         }
 

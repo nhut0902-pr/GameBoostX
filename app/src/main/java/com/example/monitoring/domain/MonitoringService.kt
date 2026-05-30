@@ -140,13 +140,27 @@ class MonitoringService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Safe immediate startForeground call on O+ to satisfy the startForegroundService mandate
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+                _isServiceRunning.value = true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         when (intent?.action) {
             ACTION_START -> {
                 activeGamePackage = intent.getStringExtra("GAME_PACKAGE")
                 activeGameName = intent.getStringExtra("GAME_NAME")
                 
                 if (!_isServiceRunning.value) {
-                    startForeground(NOTIFICATION_ID, buildNotification())
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        try {
+                            startForeground(NOTIFICATION_ID, buildNotification())
+                        } catch (e: Exception) {}
+                    }
                     _isServiceRunning.value = true
                     sessionStartTime = System.currentTimeMillis()
                     clearSessionHistory()
@@ -162,9 +176,28 @@ class MonitoringService : Service() {
             ACTION_TOGGLE_OVERLAY -> {
                 if (_isOverlayShowing.value) {
                     removeOverlay()
+                    if (activeGamePackage == null) {
+                        saveSessionRecordAndStop()
+                    }
                 } else {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+                        if (!_isServiceRunning.value) {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                                try {
+                                    startForeground(NOTIFICATION_ID, buildNotification())
+                                } catch (e: Exception) {}
+                            }
+                            _isServiceRunning.value = true
+                            sessionStartTime = System.currentTimeMillis()
+                            clearSessionHistory()
+                            startMonitoringLoop()
+                        }
                         showOverlay()
+                    } else {
+                        // Toggled ON but permission missing, cleanup service background task quickly to prevent leaks
+                        if (activeGamePackage == null) {
+                            saveSessionRecordAndStop()
+                        }
                     }
                 }
             }
@@ -436,67 +469,90 @@ class MonitoringService : Service() {
     private fun showOverlay() {
         if (_isOverlayShowing.value) return
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                @Suppress("DEPRECATION")
-                WindowManager.LayoutParams.TYPE_PHONE
-            },
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 200
-        }
-
-        // Set up the Compose Frame Container
-        val container = FrameLayout(this)
-        
-        composeView = ComposeView(this).apply {
-            val lifecycleOwner = FloatingLifecycleOwner()
-            floatingLifecycleOwner = lifecycleOwner
-
-            setViewTreeLifecycleOwner(lifecycleOwner)
-            setViewTreeViewModelStoreOwner(lifecycleOwner)
-            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
-
-            setContent {
-                var overlayMode by remember { mutableStateOf("bubble") } // bubble, panel, transparent
-
-                ThemeWrapper {
-                    FloatingOverlayWidget(
-                        metrics = _metricsState.collectAsState().value,
-                        mode = overlayMode,
-                        onModeChange = { overlayMode = it },
-                        onCloseOverlay = { removeOverlay() },
-                        modifier = Modifier.pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                params.x += dragAmount.x.toInt()
-                                params.y += dragAmount.y.toInt()
-                                windowManager.updateViewLayout(container, params)
-                            }
-                        },
-                        onOpenDashboard = {
-                            val launchIntent = Intent(context, MainActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            }
-                            context.startActivity(launchIntent)
-                        }
-                    )
-                }
+        try {
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                },
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 100
+                y = 200
             }
 
-            lifecycleOwner.handleOnStart()
-        }
+            // Set up the Compose Frame Container
+            val container = FrameLayout(this)
+            
+            composeView = ComposeView(this).apply {
+                val lifecycleOwner = FloatingLifecycleOwner()
+                floatingLifecycleOwner = lifecycleOwner
 
-        container.addView(composeView)
-        windowManager.addView(container, params)
-        _isOverlayShowing.value = true
+                setViewTreeLifecycleOwner(lifecycleOwner)
+                setViewTreeViewModelStoreOwner(lifecycleOwner)
+                setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+
+                setContent {
+                    var overlayMode by remember { mutableStateOf("bubble") } // bubble, panel, transparent
+
+                    ThemeWrapper {
+                        FloatingOverlayWidget(
+                            metrics = _metricsState.collectAsState().value,
+                            mode = overlayMode,
+                            onModeChange = { overlayMode = it },
+                            onCloseOverlay = {
+                                removeOverlay()
+                                if (activeGamePackage == null) {
+                                    saveSessionRecordAndStop()
+                                }
+                            },
+                            modifier = Modifier.pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    try {
+                                        change.consume()
+                                        params.x += dragAmount.x.toInt()
+                                        params.y += dragAmount.y.toInt()
+                                        windowManager.updateViewLayout(container, params)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
+                            },
+                            onOpenDashboard = {
+                                val launchIntent = Intent(context, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                }
+                                context.startActivity(launchIntent)
+                            }
+                        )
+                    }
+                }
+
+                lifecycleOwner.handleOnStart()
+            }
+
+            container.addView(composeView)
+            windowManager.addView(container, params)
+            _isOverlayShowing.value = true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _isOverlayShowing.value = false
+            try {
+                Handler(Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        applicationContext,
+                        "Unable to display overlay. Please toggle the permission off and back on again.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (ex: Exception) {}
+        }
     }
 
     private fun removeOverlay() {
